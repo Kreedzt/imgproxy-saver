@@ -28,6 +28,44 @@ test("plain preserves encoded source query, percent and at exactly once; outer q
   assert.ok(!parsed.signedPath.includes("?"));
   assert.match(localPath(parsed, sourceKey(source)), /^\/rs:fit:20:30\//);
 });
+test("legacy bot sig placeholder requires insecure mode; other invalid signatures still fail", () => {
+  const path =
+    "/size:200:200/resizing_type:fit/aHR0cHM6Ly93d3cuZ2Z3aWtpLm9yZy9pbWFnZXMvNi82OC9JY29uX05vLjM5NC5wbmc";
+  const parsed = parseTarget("/sig" + path);
+  assert.equal(
+    parsed.sourceUrl,
+    "https://www.gfwiki.org/images/6/68/Icon_No.394.png",
+  );
+  assert.deepEqual(parsed.options, ["size:200:200", "resizing_type:fit"]);
+  verify(parsed.signature, parsed.signedPath, key, salt, true);
+  for (const signature of ["sig", "insecure"])
+    assert.throws(() => verify(signature, path, key, salt, false));
+  for (const signature of ["SIG", "invalid", "a".repeat(43)])
+    assert.throws(() => verify(signature, path, key, salt, true));
+});
+test("raw source spaces are encoded without rewriting the signed path or existing escapes", () => {
+  const source =
+    "https://example.com/path with spaces/image%20name.png?token=a+b&x=%40&q=two words";
+  const path =
+    "/size:200:200/resizing_type:fit/" +
+    Buffer.from(source).toString("base64url");
+  const signature = sign(path, key, salt);
+  const parsed = parseTarget("/" + signature + path);
+  assert.equal(parsed.sourceUrl, source.replace(/ /g, "%20"));
+  assert.equal(parsed.signedPath, path);
+  verify(parsed.signature, parsed.signedPath, key, salt);
+  for (const unsafe of [
+    "https://example.com/a\nb",
+    "https://example.com/a\tb",
+    "https://example.com/a\\b",
+    "https://user:pass@example.com/a",
+    "https://example.com/a#fragment",
+  ]) {
+    assert.throws(() =>
+      parseTarget("/sig/" + Buffer.from(unsafe).toString("base64url")),
+    );
+  }
+});
 test("base64 segmented URL and source queries round trip", () => {
   const url = "https://example.com/a?x=2&x=1";
   const b = Buffer.from(url).toString("base64url");

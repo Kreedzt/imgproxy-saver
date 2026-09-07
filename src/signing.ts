@@ -13,7 +13,9 @@ export function verify(
   salt: string,
   allowInsecure = false,
 ) {
-  if (allowInsecure && signature === "insecure") return;
+  // Legacy bot clients use the literal "sig" placeholder for unsigned URLs.
+  if (allowInsecure && (signature === "insecure" || signature === "sig"))
+    return;
   if (!key || !salt || !/^[A-Za-z0-9_-]{43}$/.test(signature))
     throw new AppError(403, "INVALID_SIGNATURE");
   const expected = sign(path, key, salt);

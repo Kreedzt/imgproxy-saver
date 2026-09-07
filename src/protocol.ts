@@ -62,6 +62,10 @@ export function parseTarget(
       sourceUrl = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
       extension = split[1] ?? "";
     }
+    // Legacy clients Base64-encode raw spaces. Encode only those spaces so
+    // existing percent escapes, query ordering and storage keys stay intact.
+    // Keep signedPath unchanged: signatures cover the original request bytes.
+    sourceUrl = sourceUrl.replace(/ /g, "%20");
     const u = new URL(sourceUrl);
     if (
       !["http:", "https:"].includes(u.protocol) ||

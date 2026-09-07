@@ -138,6 +138,8 @@ test(
         "SOURCE_ALLOWED_HOSTS=" + origin,
         "-e",
         "ALLOW_PRIVATE_SOURCES=true",
+        "-e",
+        "ALLOW_INSECURE=true",
         "imgproxy-saver:checkpoint",
       );
       containers.add(saver);
@@ -181,6 +183,19 @@ test(
       assert.equal(bytes.readUInt32BE(20), 24);
       r = await fetch(saverUrl + first);
       assert.equal(r.headers.get("x-storage-status"), "HIT");
+      // Existing bot URL spelling: literal sig, size/fit, no format suffix,
+      // and Base64 of a source containing raw spaces.
+      const legacy =
+        "/sig/size:32:24/resizing_type:fit/" +
+        Buffer.from(
+          "http://" + origin + ":8080/path with spaces/image.png",
+        ).toString("base64url");
+      r = await fetch(saverUrl + legacy);
+      assert.equal(r.status, 200);
+      assert.equal(r.headers.get("x-storage-status"), "MISS");
+      bytes = Buffer.from(await r.arrayBuffer());
+      assert.equal(bytes.readUInt32BE(16), 32);
+      assert.equal(bytes.readUInt32BE(20), 24);
       // A second spelling of the same source must reuse the original even with origin stopped.
       docker("stop", origin);
       r = await fetch(saverUrl + target(source, "rs:fit:16:12", true));
@@ -193,6 +208,9 @@ test(
       assert.equal(bytes.readUInt32BE(16), 16);
       assert.equal(bytes.readUInt32BE(20), 12);
       docker("stop", proxy);
+      r = await fetch(saverUrl + legacy);
+      assert.equal(r.status, 200);
+      assert.equal(r.headers.get("x-storage-status"), "HIT");
       r = await fetch(saverUrl + first);
       assert.equal(r.status, 200);
       assert.equal(r.headers.get("x-storage-status"), "HIT");

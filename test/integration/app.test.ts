@@ -10,6 +10,76 @@ function target(source: string, opts = "rs:fit:20:20") {
     "/" + opts + "/" + Buffer.from(source).toString("base64url") + ".png";
   return "/" + sign(path, key, salt) + path;
 }
+test("legacy bot URLs download escaped sources, cache results, and respect migration mode", async () => {
+  const t = await temp();
+  const requests: string[] = [];
+  let processes = 0;
+  const origin = await serve((req, res) => {
+    requests.push(req.url!);
+    res.end(png);
+  });
+  const processor = await serve(async (req, res) => {
+    try {
+      const [signature, ...parts] = req.url!.slice(1).split("/");
+      verify(signature!, "/" + parts.join("/"), key, salt);
+      assert.deepEqual(parts.slice(0, 2), [
+        "size:200:200",
+        "resizing_type:fit",
+      ]);
+      const local = Buffer.from(parts.at(-1)!, "base64url").toString();
+      assert.ok(local.startsWith("local:///"));
+      const body = await readFile(
+        join(t.dir, "originals", local.slice("local:///".length)),
+      );
+      processes++;
+      res.end(body);
+    } catch {
+      res.writeHead(500);
+      res.end();
+    }
+  });
+  const cfg = { ...config(t.dir, processor.url), allowInsecure: true };
+  let app: Awaited<ReturnType<typeof createApp>> | undefined;
+  const botUrl = (source: string) =>
+    "/sig/size:200:200/resizing_type:fit/" +
+    Buffer.from(source).toString("base64url");
+  try {
+    app = await createApp(cfg);
+    const url = botUrl(
+      origin.url + "/path with spaces/image.png?token=a+b&x=%40",
+    );
+    const first = await app.inject({ url });
+    assert.equal(first.statusCode, 200, first.body);
+    assert.deepEqual(first.rawPayload, png);
+    assert.equal(first.headers["x-storage-status"], "MISS");
+    assert.deepEqual(requests, [
+      "/path%20with%20spaces/image.png?token=a+b&x=%40",
+    ]);
+    assert.equal(
+      (await app.inject({ url })).headers["x-storage-status"],
+      "HIT",
+    );
+    assert.equal(processes, 1);
+    assert.equal(requests.length, 1);
+    // Migration mode does not bypass the source allowlist.
+    const denied = await app.inject({
+      url: botUrl("https://not-allowed.example/image.png"),
+    });
+    assert.equal(denied.statusCode, 403);
+    assert.equal(denied.json().error, "SOURCE_NOT_ALLOWED");
+    await app.close();
+    app = await createApp({ ...cfg, allowInsecure: false });
+    const strict = await app.inject({ url });
+    assert.equal(strict.statusCode, 403);
+    assert.equal(strict.json().error, "INVALID_SIGNATURE");
+    assert.equal(processes, 1);
+  } finally {
+    await app?.close();
+    await origin.close();
+    await processor.close();
+    await t.close();
+  }
+});
 test("end-to-end service: reuse, new variants, concurrency, headers, auth, restart and restore", async () => {
   const t = await temp(),
     backup = await temp();

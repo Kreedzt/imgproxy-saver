@@ -78,7 +78,8 @@ node --env-file=.env --import tsx scripts/sign.ts \
 - 单 saver 进程、单副本、本地文件系统；禁止两个 saver 共用同一 DATA_DIR。初始化会清理未发布的 tmp 目录。
 - 外部源只支持无需额外认证头的 HTTP(S)。拒绝带 Authorization/Cookie 的客户端请求；私有源后续单独设计。
 - 不支持 SVG/XML、加密源 URL、预设、水印、Pro 选项、S3 源、自定义分隔符、路径前缀、URL 替换和 Base64 追加文件名模式。未知或不支持的选项返回 400。
-- 签名使用 SHA-256 完整 32 字节及单个 key/salt 对；不支持截短签名、trusted signatures、轮换密钥列表。生产默认验证签名，开发可通过 `ALLOW_INSECURE=true` 接受 `/insecure/...`。
+- 签名使用 SHA-256 完整 32 字节及单个 key/salt 对；不支持截短签名、trusted signatures、轮换密钥列表。应用默认验证签名；`ALLOW_INSECURE=true` 接受 `/insecure/...` 和旧机器人使用的 `/sig/...`，其他无效签名仍被拒绝。迁移时需在 saver 容器环境变量中显式设置此项（Compose 部署时添加到 `saver.environment`）；关闭后两种免签链接都会被拒绝，包括本地缓存命中。
+- 兼容机器人原有 `/sig/size:200:200/resizing_type:fit/<Base64URL>` 路径，无需改动生成代码。源 URL 解码后的原始空格会转为 `%20`；已有百分号编码和查询参数顺序保持不变，签名仍验证原始请求路径。原图及重定向目标仍须配置 `SOURCE_ALLOWED_HOSTS`。要保持客户端服务地址不变，可让 saver 接管旧端口；部署时必须使用包含此兼容修改的新 saver 镜像。
 - `expires/exp` 在本地命中之前和返回之前都检查；首版拒绝小于等于当前秒的时间戳（比 imgproxy 原生的 0 值和边界行为更严格）。有有效期的 URL 使用 `Cache-Control: no-cache`。
 - 不转发 Client Hints；首版不要在 imgproxy 启用 Client Hints。Range 被忽略，返回完整 200，不存储 206。
 - 原图下载不采用上游的 Cache-Control/Expires 淘汰策略；同一源 URL 永远绑定首次成功保存的原图。HTTP 200 且可识别的二进制图片才保存；实际解码由 imgproxy 完成，解码失败可保留原图供排查。
