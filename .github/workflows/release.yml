@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+# Serialize releases so concurrent builds do not race to update latest.
+concurrency:
+  group: dockerhub-release
+  cancel-in-progress: false
+
+jobs:
+  regression:
+    uses: ./.github/workflows/test.yml
+
+  docker:
+    name: Publish to Docker Hub
+    needs: regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      IMAGE: ${{ vars.DOCKERHUB_IMAGE || format('{0}/imgproxy-saver', secrets.DOCKERHUB_USERNAME) }}
+    steps:
+      - name: Checkout release
+        uses: actions/checkout@v4
+
+      - name: Prepare image tags
+        id: tags
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}$ || "$RELEASE_TAG" == 'latest' ]]; then
+            echo 'Release tag must be a valid Docker tag other than latest.' >&2
+            exit 1
+          fi
+          if [[ ! "$IMAGE" =~ ^[a-z0-9]+([._-][a-z0-9]+)*/[a-z0-9]+([._-][a-z0-9]+)*$ ]]; then
+            echo 'Set DOCKERHUB_USERNAME or DOCKERHUB_IMAGE to a valid Docker Hub namespace/repository.' >&2
+            exit 1
+          fi
+          {
+            echo 'tags<<EOF'
+            echo "$IMAGE:$RELEASE_TAG"
+            if [[ "$PRERELEASE" == 'false' && "$RELEASE_TAG" != 'latest' ]]; then
+              echo "$IMAGE:latest"
+            fi
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha,scope=release
+          cache-to: type=gha,mode=max,scope=release

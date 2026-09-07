@@ -1,0 +1,41 @@
+services:
+  saver:
+    build: .
+    init: true
+    restart: unless-stopped
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${PORT:-3000}:3000"
+    environment:
+      PORT: "3000"
+      DATA_DIR: /data
+      IMGPROXY_URL: http://imgproxy:8080
+      EXTERNAL_KEY: ${EXTERNAL_KEY:?set EXTERNAL_KEY}
+      EXTERNAL_SALT: ${EXTERNAL_SALT:?set EXTERNAL_SALT}
+      INTERNAL_KEY: ${INTERNAL_KEY:?set INTERNAL_KEY}
+      INTERNAL_SALT: ${INTERNAL_SALT:?set INTERNAL_SALT}
+      SOURCE_ALLOWED_HOSTS: ${SOURCE_ALLOWED_HOSTS:?set SOURCE_ALLOWED_HOSTS}
+      ALLOW_PRIVATE_SOURCES: ${ALLOW_PRIVATE_SOURCES:-false}
+      MAX_SOURCE_BYTES: ${MAX_SOURCE_BYTES:-20971520}
+      MAX_RESULT_BYTES: ${MAX_RESULT_BYTES:-41943040}
+      TIMEOUT_MS: ${TIMEOUT_MS:-30000}
+      CONCURRENCY: ${CONCURRENCY:-4}
+      QUEUE_LIMIT: ${QUEUE_LIMIT:-64}
+      PROCESSING_VERSION: ${PROCESSING_VERSION:-1}
+    volumes:
+      - ./data:/data
+    depends_on:
+      - imgproxy
+  imgproxy:
+    image: darthsim/imgproxy:v3.29.1@sha256:7d12c7c8fc66b3cd5fc8d1e21d0aad25bed8438e5bc8460d95351ac905a71ea3
+    restart: unless-stopped
+    environment:
+      IMGPROXY_KEY: ${INTERNAL_KEY:?set INTERNAL_KEY}
+      IMGPROXY_SALT: ${INTERNAL_SALT:?set INTERNAL_SALT}
+      IMGPROXY_LOCAL_FILESYSTEM_ROOT: /sources
+      IMGPROXY_ALLOWED_SOURCES: local:///
+      IMGPROXY_AUTO_WEBP: "true"
+      IMGPROXY_MAX_SRC_FILE_SIZE: "${MAX_SOURCE_BYTES:-20971520}"
+      IMGPROXY_MAX_SRC_RESOLUTION: "50"
+      IMGPROXY_MAX_ANIMATION_FRAMES: "1"
+    volumes:
+      - ./data/originals:/sources:ro
